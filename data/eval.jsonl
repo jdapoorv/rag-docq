@@ -1,5 +1,5 @@
-{"question":"What does serverless refer to in AWS?", "ground_truth":"serverless refers to a cloud computing model where you don’t manage or provision servers directly", "source":"/Volumes/workplace/rag-docq/data/raw/AWS-overview.pdf",
-"question":"How do you use a lambda function?", "ground_truth":"You just upload your code, and AWS automatically handles provisioning, scaling, and execution", "source":"/Volumes/workplace/rag-docq/data/raw/AWS-overview.pdf",
-"question":"What is the full form of AWS?", "ground_truth":"The full form of AWS is Amazon Web Services.", "source":"/Volumes/workplace/rag-docq/data/raw/AWS-overview.pdf",
-"question":"What is AWS Kendra?", "ground_truth":"Amazon Kendra is an intelligent search service powered by ML", "source":"/Volumes/workplace/rag-docq/data/raw/AWS-overview.pdf",
-"question":"Does AWS provide a backup storage service?", "ground_truth":"AWS Backup enables you to centralize and automate data protection across AWS services.", "source":"/Volumes/workplace/rag-docq/data/raw/AWS-overview.pdf"}
+{"question":"What does serverless refer to in AWS?", "ground_truth":"serverless refers to a cloud computing model where you don’t manage or provision servers directly", "source":"/Volumes/workplace/rag-docq/data/raw/AWS-overview.pdf"}
+{"question":"How do you use a lambda function?", "ground_truth":"You just upload your code, and AWS automatically handles provisioning, scaling, and execution", "source":"/Volumes/workplace/rag-docq/data/raw/AWS-overview.pdf"}
+{"question":"What is the full form of AWS?", "ground_truth":"The full form of AWS is Amazon Web Services.", "source":"/Volumes/workplace/rag-docq/data/raw/AWS-overview.pdf"}
+{"question":"What is AWS Kendra?", "ground_truth":"Amazon Kendra is an intelligent search service powered by ML", "source":"/Volumes/workplace/rag-docq/data/raw/AWS-overview.pdf"}
+{"question":"Does AWS provide a backup storage service?", "ground_truth":"AWS Backup enables you to centralize and automate data protection across AWS services.", "source":"/Volumes/workplace/rag-docq/data/raw/AWS-overview.pdf"}
