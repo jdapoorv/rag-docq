@@ -3,7 +3,6 @@ RAG DocQ — Intelligent Document Q&A (RAG System)
 A production-ish Retrieval-Augmented Generation (RAG) app that lets you ask questions about your documents and get grounded answers with citations.
 It supports local (Ollama) and hosted (OpenAI) modes, hybrid retrieval (FAISS dense + BM25), cross-encoder re-ranking, a Streamlit UI, and a FastAPI endpoint.
 
-<p align="center"> <img alt="RAG DocQ UI" src="docs/screenshot.png" width="700"/> </p>
 ✨ Features
 
 Ingestion: PDFs/HTML/MD/TXT → clean → chunk → embed → FAISS index
@@ -214,3 +213,4 @@ MIT — see LICENSE (add one if you haven’t yet).
 AWS, RBI, GDPR, FAO documents for the sample corpus
 
 Sentence-Transformers, FAISS, and Streamlit communities
+
