@@ -33,57 +33,59 @@ def load_eval_set(path: str) -> List[EvalItem]:
     return items
 
 def run_batch_eval(items: List[EvalItem], k_retrieved: int = 8) -> Dict[str, Any]:
-    # Collect predictions and contexts via your pipeline
+    # 1) Run your real pipeline to collect answers + contexts
     results = []
     latencies = []
-    for i, it in enumerate(items, start=1):
+    for it in items:
         t0 = time.time()
-        ans, docs = answer(it.question)   # your function returns (answer_text, [docs])
-        lat = time.time() - t0
-        latencies.append(lat)
+        ans, docs = answer(it.question)
+        latencies.append(time.time() - t0)
         contexts = [d.page_content for d in docs]
-        results.append({
-            "question": it.question,
-            "answer": ans,
-            "contexts": contexts,
-            "ground_truth": it.ground_truth or "",  # ragas expects strings
-        })
+        results.append(
+            {
+                "question": it.question,
+                "answer": ans or "",
+                "contexts": contexts,               # list[str]
+                "ground_truth": it.ground_truth or ""  # ragas expects a string (can be empty)
+            }
+        )
 
-    # Build a ragas dataset (list of dicts)
-    ragas_input = [{
-        "question": r["question"],
-        "answer": r["answer"],
-        "contexts": r["contexts"],
-        "ground_truth": r["ground_truth"],
-    } for r in results]
+    # 2) Build a HF Dataset for ragas (NOT a plain list)
+    import pandas as pd
+    from datasets import Dataset as HFDataset
 
-    # Evaluate with RAGAS. Uses your default OpenAI model as the judge.
-    # You can control model via env: OPENAI_MODEL or set an explicit judge here.
-    ragas_report = evaluate(
-        ragas_input,
-        metrics=[faithfulness, answer_relevancy, context_recall, context_precision],
-    )
+    df = pd.DataFrame(results)
+    ds = HFDataset.from_pandas(df)
 
-    # Simple retrieval metrics: Recall@k = did any context contain GT string?
-    # (Only computed if ground_truth provided)
-    hit, total = 0, 0
-    for r in results:
-        gt = (r["ground_truth"] or "").strip()
-        if not gt:
-            continue
-        total += 1
-        blob = " ".join(r["contexts"]).lower()
-        if gt[:80].lower() in blob:  # naive substring check; OK for demos
-            hit += 1
-    recall_at_k = (hit / total) if total > 0 else None
+    # 3) Choose metrics (only use GT-dependent metrics if any GT present)
+    from ragas.metrics import faithfulness, answer_relevancy, context_recall, context_precision
+    has_gt = any(bool((r.get("ground_truth") or "").strip()) for r in results)
+    metrics = [faithfulness, answer_relevancy] + ([context_recall, context_precision] if has_gt else [])
 
-    # Latency stats
+    # 4) Evaluate with ragas
+    ragas_report = evaluate(ds, metrics=metrics)
+
+    # 5) Naive retrieval Recall@k using GT substring (only if GT present)
+    recall_at_k = None
+    if has_gt:
+        hit, total = 0, 0
+        for r in results:
+            gt = (r["ground_truth"] or "").strip()
+            if not gt:
+                continue
+            total += 1
+            blob = " ".join(r["contexts"]).lower()
+            if gt[:80].lower() in blob:
+                hit += 1
+        recall_at_k = (hit / total) if total else None
+
+    # 6) Latency stats
     import numpy as np
     lat_p50 = float(np.median(latencies)) if latencies else 0.0
     lat_p95 = float(np.percentile(latencies, 95)) if latencies else 0.0
 
     return {
-        "ragas": ragas_report,  # this has per-metric means and distributions
+        "ragas": ragas_report,
         "recall_at_k": recall_at_k,
         "lat_p50": lat_p50,
         "lat_p95": lat_p95,
