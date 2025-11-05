@@ -62,8 +62,8 @@ def get_embedder():
                 else:
                     raise
     if settings.EMBEDDINGS_BACKEND == "hf":
-        from langchain_community.embeddings import HuggingFaceBgeEmbeddings
-        return HuggingFaceBgeEmbeddings(model_name=settings.HF_EMBED_MODEL)
+        from langchain_huggingface import HuggingFaceEmbeddings
+        return HuggingFaceEmbeddings(model_name=settings.HF_EMBED_MODEL)
     # default: OpenAI
     else:
         # OpenAI embeddings (hosted)

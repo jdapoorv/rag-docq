@@ -71,6 +71,7 @@ if "is_indexing" not in st.session_state:
 with st.sidebar:
     st.header("⚙️ Settings")
     st.caption("Switch between local (Ollama) and hosted (OpenAI) in your `.env`.")
+
     st.write(f"**Mode:** `{settings.MODE}`")
     st.write(f"**Doc dir:** `{settings.DOC_DIR}`")
     st.write(f"**Index dir:** `{settings.INDEX_DIR}`")
@@ -81,14 +82,47 @@ with st.sidebar:
     uploaded = st.file_uploader(
         "Add PDF/Markdown/HTML/TXT",
         type=["pdf","md","html","txt"],
-        accept_multiple_files=True
+        accept_multiple_files=True,
+        help="Drop one or more files to include in your document corpus. They will be stored in the Doc dir shown above."
     )
 
-    # Controls to keep Cloud ingestion light
-    limit_chunks = st.number_input("Index only first N chunks (0 = all)", min_value=0, max_value=5000, value=60, step=20)
-    batch_size = st.slider("Embedding batch size", 1, 16, 5)
-    sleep_between = st.slider("Sleep between batches (sec)", 0.0, 2.0, 0.6, 0.1)
+    # Smart defaults based on embedding backend
+    backend = os.getenv("EMBEDDINGS_BACKEND", "hf").lower()
+    if backend == "hf":
+        default_batch = 8
+        default_sleep = 0.0
+        default_limit = 100
+    else:  # openai or other HTTP API
+        default_batch = 4
+        default_sleep = 1.0
+        default_limit = 100
 
+    limit_chunks = st.number_input(
+        "Index only first N chunks (0 = all)",
+        min_value=0, max_value=5000, value=default_limit, step=20,
+        help="How many chunks to embed/index this run. 0 = all. Use 100–200 first to smoke-test, then set to 0."
+    )
+
+    batch_size = st.slider(
+        "Embedding batch size",
+        min_value=1, max_value=16, value=default_batch,
+        help="How many chunks to embed at once. Higher = faster but more CPU/RAM. Lower = safer on small machines."
+    )
+
+    sleep_between = st.slider(
+        "Sleep between batches (sec)",
+        min_value=0.0, max_value=2.0, value=default_sleep, step=0.1,
+        help="Pause after each batch. Needed only for API rate limits (e.g., OpenAI). For HuggingFace (local), set to 0.0."
+    )
+
+    with st.expander("ℹ️ What do these settings do?", expanded=False):
+        st.markdown("""
+**Index only first N chunks** — limit how much of the doc you index this run (0 = all).  
+**Embedding batch size** — more chunks at once = faster, but heavier on CPU/RAM.  
+**Sleep between batches** — pause between batches to avoid API rate limits (use 0.0 for local/HuggingFace).
+        """)
+
+    # Single-ingest lock + progress
     if st.button(
         "Rebuild Index",
         type="primary",
@@ -100,22 +134,22 @@ with st.sidebar:
         else:
             st.session_state.is_indexing = True
             try:
-                # Save uploads
                 doc_dir = Path(settings.DOC_DIR)
                 doc_dir.mkdir(parents=True, exist_ok=True)
+
+                # Save any newly uploaded files
                 if uploaded:
                     for f in uploaded:
                         (doc_dir / f.name).write_bytes(f.getbuffer())
 
-                # Live status panel (replaces silent spinner)
+                # Live status panel with log updates from ingest
                 with st.status("Indexing…", expanded=True) as status:
                     log_area = st.empty()
                     lines = []
 
                     def _progress(evt: dict):
-                        # evt = {"stage": "...", "msg": "..."}
+                        # evt is {"msg": "..."} from ingest
                         lines.append(evt.get("msg", ""))
-                        # keep last ~40 lines
                         log_area.text("\n".join(lines[-40:]))
 
                     ingest.build_index(
