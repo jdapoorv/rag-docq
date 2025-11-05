@@ -1,19 +1,26 @@
-import os, json
+# app/ingest.py
+import os
+import time
 from pathlib import Path
+from typing import List, Tuple
+
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 from langchain_community.docstore.document import Document
 from app.config import settings
 
 
+# ----------------- helpers -----------------
+
 def ensure_index():
     idx_dir = Path(settings.INDEX_DIR)
     if not (idx_dir / "index.faiss").exists():
         build_index()
 
+
 # Simple loaders (add more as needed)
-def load_documents(doc_dir: str) -> list[Document]:
-    docs = []
+def load_documents(doc_dir: str) -> List[Document]:
+    docs: List[Document] = []
     for p in Path(doc_dir).glob("**/*"):
         if p.suffix.lower() in {".pdf", ".txt", ".md", ".html"}:
             text = extract_text(p)
@@ -21,8 +28,10 @@ def load_documents(doc_dir: str) -> list[Document]:
                 docs.append(Document(page_content=text, metadata={"source": str(p)}))
     return docs
 
+
 def extract_text(path: Path) -> str:
     if path.suffix.lower() == ".pdf":
+        # pypdf first (fast), you can add PyMuPDF fallback if needed
         from pypdf import PdfReader
         return "\n".join(page.extract_text() or "" for page in PdfReader(str(path)).pages)
     elif path.suffix.lower() == ".md":
@@ -33,108 +42,141 @@ def extract_text(path: Path) -> str:
     else:
         return path.read_text(encoding="utf-8", errors="ignore")
 
+
 def get_embedder():
     if settings.MODE == "local":
+        # Ollama embeddings
         from langchain_ollama import OllamaEmbeddings
-        import time
-        
-        # Test connection and retry if needed
+        # quick connectivity probe with light retry
         max_retries = 3
         for attempt in range(max_retries):
             try:
-                embeddings = OllamaEmbeddings(model=settings.OLLAMA_EMBED)
-                # Test with a simple embedding
-                test_result = embeddings.embed_query("test connection")
-                print(f"✓ Successfully connected to Ollama embedding service")
-                return embeddings
+                emb = OllamaEmbeddings(model=settings.OLLAMA_EMBED)
+                _ = emb.embed_query("ping")
+                print("✓ Ollama embeddings ready")
+                return emb
             except Exception as e:
-                print(f"⚠ Connection attempt {attempt + 1}/{max_retries} failed: {e}")
+                print(f"⚠ Ollama connect {attempt+1}/{max_retries} failed: {e}")
                 if attempt < max_retries - 1:
-                    wait_time = 2 ** attempt
-                    print(f"  Retrying in {wait_time} seconds...")
-                    time.sleep(wait_time)
+                    time.sleep(1 + attempt)
                 else:
-                    print(f"✗ Failed to connect after {max_retries} attempts")
                     raise
     else:
+        # OpenAI embeddings (hosted)
         from langchain_openai import OpenAIEmbeddings
         return OpenAIEmbeddings(model=settings.OPENAI_EMBED_MODEL)
+
+
+def _filter_chunks(chunks: List[Document], min_chars: int = 200) -> List[Document]:
+    """Drop very short chunks and exact duplicates to save tokens/QPS."""
+    seen = set()
+    keep: List[Document] = []
+    for d in chunks:
+        txt = (d.page_content or "").strip()
+        if len(txt) < min_chars:
+            continue
+        sig = (d.metadata.get("source", ""), txt[:160])
+        if sig in seen:
+            continue
+        seen.add(sig)
+        keep.append(d)
+    return keep
+
+
+def _embed_texts_throttled(
+    texts: List[str],
+    emb,
+    batch_size: int = 5,
+    sleep_between: float = 0.6,
+    max_retries: int = 6,
+) -> Tuple[List[List[float]], List[int]]:
+    """
+    Embed texts in tiny batches with exponential backoff.
+    Returns (vectors, ok_indices) so we can drop failed items safely.
+    """
+    vectors: List[List[float]] = []
+    ok_indices: List[int] = []
+    total = len(texts)
+
+    for start in range(0, total, batch_size):
+        end = min(start + batch_size, total)
+        batch = texts[start:end]
+        attempt = 0
+        while True:
+            try:
+                vecs = emb.embed_documents(batch)
+                vectors.extend(vecs)
+                ok_indices.extend(range(start, end))
+                if sleep_between > 0:
+                    time.sleep(sleep_between)  # be gentle with rate limits
+                break
+            except Exception as e:
+                attempt += 1
+                if attempt > max_retries:
+                    print(f"✗ Batch {start//batch_size+1} failed permanently: {str(e)[:80]}...")
+                    # skip this batch and continue; we won't index those items
+                    break
+                delay = min(8.0, 1.0 * (2 ** (attempt - 1)))
+                print(f"⚠ 429/Transient error on batch {start//batch_size+1}, retry {attempt}/{max_retries} in {delay:.1f}s")
+                time.sleep(delay)
+
+    return vectors, ok_indices
+
+
+# ----------------- main build -----------------
 
 def build_index():
     print("Building index...")
     docs = load_documents(settings.DOC_DIR)
     print(f"Loaded {len(docs)} documents")
-    
+
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=settings.CHUNK_SIZE, chunk_overlap=settings.CHUNK_OVERLAP
     )
     chunks = splitter.split_documents(docs)
     print(f"Split into {len(chunks)} chunks")
-    
-    embeddings = get_embedder()
-    
-    # Process chunks in batches to avoid overwhelming the embedding service
-    batch_size = 20  # Smaller batches for better reliability
-    
-    print(f"Processing {len(chunks)} chunks in batches of {batch_size}")
-    
-    vs = None
-    failed_batches = []
-    successful_batches = 0
-    
-    for i in range(0, len(chunks), batch_size):
-        batch = chunks[i:i + batch_size]
-        batch_num = i // batch_size + 1
-        total_batches = (len(chunks) + batch_size - 1) // batch_size
-        
-        print(f"Processing batch {batch_num}/{total_batches} ({len(batch)} chunks)", end=" ")
-        
-        # Retry logic for each batch
-        max_batch_retries = 3
-        batch_success = False
-        
-        for retry in range(max_batch_retries):
-            try:
-                if vs is None:
-                    # Create initial index with first batch
-                    vs = FAISS.from_documents(batch, embeddings)
-                else:
-                    # Add subsequent batches to existing index
-                    batch_vs = FAISS.from_documents(batch, embeddings)
-                    vs.merge_from(batch_vs)
-                
-                print("✓")
-                successful_batches += 1
-                batch_success = True
-                break
-                
-            except Exception as e:
-                if retry < max_batch_retries - 1:
-                    wait_time = 1 + retry
-                    print(f"⚠ (retry {retry + 1}/{max_batch_retries} in {wait_time}s)", end=" ")
-                    import time
-                    time.sleep(wait_time)
-                else:
-                    print(f"✗ Failed after {max_batch_retries} attempts: {str(e)[:50]}...")
-                    failed_batches.append((batch_num, str(e)))
-        
-        # Continue processing even if some batches fail
-        # The index will be created from successful batches
-    
-    # Summary
-    print(f"\n� Processing Summary:")
-    print(f"   ✓ Successful batches: {successful_batches}/{total_batches}")
-    if failed_batches:
-        print(f"   ✗ Failed batches: {len(failed_batches)}")
-        print(f"   📝 Failed batch numbers: {[b[0] for b in failed_batches]}")
-        print(f"   ℹ️  Note: Failed batches are skipped but don't affect the final index")
-    
-    if vs is None:
-        raise Exception("Failed to create any embeddings")
-        
+
+    # Reduce load: drop tiny/dup chunks (tune min_chars if needed)
+    chunks = _filter_chunks(chunks, min_chars=200)
+    print(f"Kept {len(chunks)} chunks after filtering")
+
+    if not chunks:
+        raise RuntimeError("No usable chunks to index. Add documents to data/raw/ and try again.")
+
+    emb = get_embedder()
+
+    # Prepare texts and metadata
+    texts = [d.page_content for d in chunks]
+    metas = [d.metadata for d in chunks]
+
+    print(f"Embedding {len(texts)} chunks with throttling...")
+    vecs, ok_idx = _embed_texts_throttled(
+        texts, emb, batch_size=5, sleep_between=0.6, max_retries=6
+    )
+
+    if not ok_idx:
+        raise RuntimeError("Failed to create embeddings (rate-limited or API error). Try again later or prebuild locally.")
+
+    # Keep only successful items
+    ok_texts = [texts[i] for i in ok_idx]
+    ok_metas = [metas[i] for i in ok_idx]
+
+    # Build FAISS once from precomputed vectors
+    # (Requires langchain_community >= 0.1.0 which you have)
+    pairs = list(zip(ok_texts, vecs))
+    vs = FAISS.from_embeddings(pairs, metadatas=ok_metas)
+
     Path(settings.INDEX_DIR).mkdir(parents=True, exist_ok=True)
     vs.save_local(settings.INDEX_DIR)
-    print(f"Index built and saved to {settings.INDEX_DIR}")
+
+    # Summary
+    print("\n✅ Index built")
+    print(f"   Indexed chunks: {len(ok_texts)}/{len(texts)}")
+    dropped = len(texts) - len(ok_texts)
+    if dropped:
+        print(f"   Dropped (failed or filtered): {dropped}")
+    print(f"   Saved to: {settings.INDEX_DIR}")
+
 
 if __name__ == "__main__":
     build_index()

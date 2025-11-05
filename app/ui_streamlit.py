@@ -24,18 +24,6 @@ from app import ingest
 from pathlib import Path
 import time
 
-# Optional: build once if missing on Cloud
-try:
-    from app.ingest import ensure_index
-    ensure_index()
-except Exception as e:
-    # keep UI usable even if ingest fails (e.g., empty /data/raw on first boot)
-    pass
-
-print("MODE:", os.getenv("MODE"))
-print("Has OPENAI_API_KEY:", bool(os.getenv("OPENAI_API_KEY")))
-print("OPENAI_EMBED_MODEL:", os.getenv("OPENAI_EMBED_MODEL"))
-
 # ---------- Page & Styles ----------
 st.set_page_config(page_title="RAG DocQ", page_icon="📄", layout="wide", initial_sidebar_state="expanded")
 
@@ -85,19 +73,30 @@ with st.sidebar:
     uploaded = st.file_uploader(
         "Add PDF/Markdown/HTML/TXT", type=["pdf","md","html","txt"], accept_multiple_files=True
     )
-    if st.button("Rebuild Index", type="primary", use_container_width=True):
-        doc_dir = Path(settings.DOC_DIR)
-        doc_dir.mkdir(parents=True, exist_ok=True)
-        if uploaded:
-            for f in uploaded:
-                out = doc_dir / f.name
-                with open(out, "wb") as w:
-                    w.write(f.getbuffer())
-        with st.spinner("Indexing..."):
-            ingest.build_index()
-            reset_retriever()
-            time.sleep(0.2)
-        st.success("Index rebuilt and retriever reloaded.")
+    # in the sidebar, replace your current "Rebuild Index" handler with this:
+if st.button("Rebuild Index", type="primary", use_container_width=True, disabled=st.session_state.is_indexing):
+    if st.session_state.is_indexing:
+        st.warning("Indexing is already running…")
+    else:
+        st.session_state.is_indexing = True
+        try:
+            doc_dir = Path(settings.DOC_DIR)
+            doc_dir.mkdir(parents=True, exist_ok=True)
+            if uploaded:
+                for f in uploaded:
+                    out = doc_dir / f.name
+                    with open(out, "wb") as w:
+                        w.write(f.getbuffer())
+            with st.spinner("Indexing… this may take a minute on hosted mode"):
+                ingest.build_index()     # your throttled ingest.py
+                reset_retriever()        # refresh retriever after new index
+                time.sleep(0.2)
+            st.success("Index rebuilt and retriever reloaded.")
+        except Exception as e:
+            # Show a concise error (429s, etc.)
+            st.error(f"Indexing failed: {e}")
+        finally:
+            st.session_state.is_indexing = False
 
     st.divider()
     st.subheader("🧪 Example questions")
@@ -118,6 +117,8 @@ if "history" not in st.session_state:
     st.session_state.history: List[Dict] = []  # [{q, a, sources}]
 if "q" not in st.session_state:
     st.session_state.q = ""
+if "is_indexing" not in st.session_state:
+    st.session_state.is_indexing = False
 
 # ---------- Main Layout ----------
 col_left, col_right = st.columns([7,5], gap="large")
@@ -138,6 +139,7 @@ with col_left:
             "sources": [{"source": d.metadata.get("source",""), "text": d.page_content} for d in docs]
         })
         # Rerun to refresh the app and clear the input
+        st.session_state.q = ""
         st.rerun()
 
     # Chat history render

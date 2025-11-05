@@ -21,8 +21,8 @@ class Settings(BaseSettings):
     DOC_DIR: str = str(BASE_DIR / "data/raw")
 
     # Retrieval knobs
-    CHUNK_SIZE: int = 850
-    CHUNK_OVERLAP: int = 120
+    CHUNK_SIZE: int = 1400
+    CHUNK_OVERLAP: int = 80
     TOP_K: int = 8
     RERANK_TOP_K: int = 4
 
