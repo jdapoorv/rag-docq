@@ -115,11 +115,13 @@ with st.sidebar:
         help="Pause after each batch. Needed only for API rate limits (e.g., OpenAI). For HuggingFace (local), set to 0.0."
     )
 
-    with st.expander("ℹ️ What do these settings do?", expanded=False):
+    with st.expander("⚙️ Advanced tips", expanded=False):
         st.markdown("""
-**Index only first N chunks** — limit how much of the doc you index this run (0 = all).  
-**Embedding batch size** — more chunks at once = faster, but heavier on CPU/RAM.  
-**Sleep between batches** — pause between batches to avoid API rate limits (use 0.0 for local/HuggingFace).
+    - **HuggingFace (local) embeddings**: Batch **8–10**, Sleep **0.0**.
+    - **OpenAI embeddings**: Batch **3–5**, Sleep **0.8–1.2s**; start with **100–200** chunks.
+    - Seeing **429 rate limits**? Lower batch or increase sleep.
+    - Switched embedding backend? **Rebuild the index** so dimensions match.
+    - Big PDFs → lots of chunks. Try indexing **first 100** to smoke-test, then set to **0** (all).
         """)
 
     # Single-ingest lock + progress
