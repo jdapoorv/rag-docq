@@ -44,7 +44,7 @@ def extract_text(path: Path) -> str:
 
 
 def get_embedder():
-    if settings.MODE == "local":
+    if settings.EMBEDDINGS_BACKEND == "ollama":
         # Ollama embeddings
         from langchain_ollama import OllamaEmbeddings
         # quick connectivity probe with light retry
@@ -61,6 +61,10 @@ def get_embedder():
                     time.sleep(1 + attempt)
                 else:
                     raise
+    if settings.EMBEDDINGS_BACKEND == "hf":
+        from langchain_community.embeddings import HuggingFaceBgeEmbeddings
+        return HuggingFaceBgeEmbeddings(model_name=settings.HF_EMBED_MODEL)
+    # default: OpenAI
     else:
         # OpenAI embeddings (hosted)
         from langchain_openai import OpenAIEmbeddings
@@ -125,58 +129,58 @@ def _embed_texts_throttled(
 
 # ----------------- main build -----------------
 
-def build_index():
-    print("Building index...")
+# app/ingest.py
+
+def _emit(progress, msg):
+    try:
+        if progress:
+            progress({"msg": msg})
+    except Exception:
+        pass
+
+def build_index(progress=None, limit_chunks: int = 0, batch_size: int = 5, sleep_between: float = 0.6):
+    _emit(progress, "Building index…")
     docs = load_documents(settings.DOC_DIR)
-    print(f"Loaded {len(docs)} documents")
+    _emit(progress, f"Loaded {len(docs)} documents")
 
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=settings.CHUNK_SIZE, chunk_overlap=settings.CHUNK_OVERLAP
     )
     chunks = splitter.split_documents(docs)
-    print(f"Split into {len(chunks)} chunks")
+    _emit(progress, f"Split into {len(chunks)} chunks")
 
-    # Reduce load: drop tiny/dup chunks (tune min_chars if needed)
     chunks = _filter_chunks(chunks, min_chars=200)
-    print(f"Kept {len(chunks)} chunks after filtering")
+    _emit(progress, f"Kept {len(chunks)} chunks after filtering (<200 chars dropped, dups removed)")
+
+    if limit_chunks and limit_chunks > 0:
+        chunks = chunks[:limit_chunks]
+        _emit(progress, f"Limiting to first {len(chunks)} chunks")
 
     if not chunks:
         raise RuntimeError("No usable chunks to index. Add documents to data/raw/ and try again.")
 
     emb = get_embedder()
-
-    # Prepare texts and metadata
     texts = [d.page_content for d in chunks]
     metas = [d.metadata for d in chunks]
 
-    print(f"Embedding {len(texts)} chunks with throttling...")
+    _emit(progress, f"Embedding {len(texts)} chunks (batch={batch_size}, sleep={sleep_between}s)…")
     vecs, ok_idx = _embed_texts_throttled(
-        texts, emb, batch_size=5, sleep_between=0.6, max_retries=6
+        texts, emb, batch_size=batch_size, sleep_between=sleep_between, max_retries=6
     )
 
     if not ok_idx:
-        raise RuntimeError("Failed to create embeddings (rate-limited or API error). Try again later or prebuild locally.")
+        raise RuntimeError("Failed to create embeddings (rate-limited or API error). Try a smaller N or prebuild locally.")
 
-    # Keep only successful items
     ok_texts = [texts[i] for i in ok_idx]
     ok_metas = [metas[i] for i in ok_idx]
-
-    # Build FAISS once from precomputed vectors
-    # (Requires langchain_community >= 0.1.0 which you have)
     pairs = list(zip(ok_texts, vecs))
+
+    _emit(progress, "Building FAISS index…")
     vs = FAISS.from_embeddings(pairs, metadatas=ok_metas)
 
     Path(settings.INDEX_DIR).mkdir(parents=True, exist_ok=True)
     vs.save_local(settings.INDEX_DIR)
-
-    # Summary
-    print("\n✅ Index built")
-    print(f"   Indexed chunks: {len(ok_texts)}/{len(texts)}")
-    dropped = len(texts) - len(ok_texts)
-    if dropped:
-        print(f"   Dropped (failed or filtered): {dropped}")
-    print(f"   Saved to: {settings.INDEX_DIR}")
-
+    _emit(progress, f"✅ Index built and saved to {settings.INDEX_DIR} (indexed {len(ok_texts)}/{len(texts)})")
 
 if __name__ == "__main__":
     build_index()

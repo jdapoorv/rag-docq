@@ -23,7 +23,11 @@ class Settings(BaseSettings):
     # Retrieval knobs
     CHUNK_SIZE: int = 1400
     CHUNK_OVERLAP: int = 80
-    TOP_K: int = 8
+    TOP_K: int = 8 
     RERANK_TOP_K: int = 4
+
+    # Skip OpenAI for embeddings. Keep OpenAI only for answer LLM.
+    EMBEDDINGS_BACKEND: str = "hf"
+    HF_EMBED_MODEL: str = "sentence-transformers/all-MiniLM-L6-v2"
 
 settings = Settings(_env_file=".env", _env_file_encoding="utf-8")

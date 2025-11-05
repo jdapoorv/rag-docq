@@ -5,11 +5,19 @@ from rank_bm25 import BM25Okapi
 
 # Load FAISS index
 def load_vector_store():
-    from langchain_ollama import OllamaEmbeddings
-    from langchain_openai import OpenAIEmbeddings
-    emb = OllamaEmbeddings(model=settings.OLLAMA_EMBED) if settings.MODE=="local" \
-          else OpenAIEmbeddings(model=settings.OPENAI_EMBED_MODEL)
+    if settings.EMBEDDINGS_BACKEND == "ollama":
+        from langchain_community.embeddings import OllamaEmbeddings as OE
+        emb = OE(model=settings.OLLAMA_EMBED)
+    elif settings.EMBEDDINGS_BACKEND == "hf":
+        from langchain_community.embeddings import HuggingFaceEmbeddings
+        emb = HuggingFaceEmbeddings(model_name=settings.HF_EMBED_MODEL)
+    else:
+        from langchain_openai import OpenAIEmbeddings
+        emb = OpenAIEmbeddings(model=settings.OPENAI_EMBED_MODEL)
+
+    from langchain_community.vectorstores import FAISS
     return FAISS.load_local(settings.INDEX_DIR, emb, allow_dangerous_deserialization=True)
+
 
 # Optional: BM25 on the same chunks (kept in memory)
 def corpus_from_vs(vs):

@@ -71,54 +71,81 @@ if "is_indexing" not in st.session_state:
 with st.sidebar:
     st.header("⚙️ Settings")
     st.caption("Switch between local (Ollama) and hosted (OpenAI) in your `.env`.")
-
     st.write(f"**Mode:** `{settings.MODE}`")
     st.write(f"**Doc dir:** `{settings.DOC_DIR}`")
     st.write(f"**Index dir:** `{settings.INDEX_DIR}`")
 
     st.divider()
     st.subheader("📤 Upload & Reindex")
+
     uploaded = st.file_uploader(
-        "Add PDF/Markdown/HTML/TXT", type=["pdf","md","html","txt"], accept_multiple_files=True
+        "Add PDF/Markdown/HTML/TXT",
+        type=["pdf","md","html","txt"],
+        accept_multiple_files=True
     )
-    # in the sidebar, replace your current "Rebuild Index" handler with this:
-    if st.button("Rebuild Index", type="primary", use_container_width=True, disabled=st.session_state.get("is_indexing", False)):
+
+    # Controls to keep Cloud ingestion light
+    limit_chunks = st.number_input("Index only first N chunks (0 = all)", min_value=0, max_value=5000, value=60, step=20)
+    batch_size = st.slider("Embedding batch size", 1, 16, 5)
+    sleep_between = st.slider("Sleep between batches (sec)", 0.0, 2.0, 0.6, 0.1)
+
+    if st.button(
+        "Rebuild Index",
+        type="primary",
+        use_container_width=True,
+        disabled=st.session_state.get("is_indexing", False),
+    ):
         if st.session_state.get("is_indexing", False):
             st.warning("Indexing is already running…")
         else:
             st.session_state.is_indexing = True
             try:
+                # Save uploads
                 doc_dir = Path(settings.DOC_DIR)
                 doc_dir.mkdir(parents=True, exist_ok=True)
                 if uploaded:
                     for f in uploaded:
-                        out = doc_dir / f.name
-                        with open(out, "wb") as w:
-                            w.write(f.getbuffer())
-                with st.spinner("Indexing… this may take a minute on hosted mode"):
-                    ingest.build_index()     # your throttled ingest.py
-                    reset_retriever()        # refresh retriever after new index
-                    time.sleep(0.2)
+                        (doc_dir / f.name).write_bytes(f.getbuffer())
+
+                # Live status panel (replaces silent spinner)
+                with st.status("Indexing…", expanded=True) as status:
+                    log_area = st.empty()
+                    lines = []
+
+                    def _progress(evt: dict):
+                        # evt = {"stage": "...", "msg": "..."}
+                        lines.append(evt.get("msg", ""))
+                        # keep last ~40 lines
+                        log_area.text("\n".join(lines[-40:]))
+
+                    ingest.build_index(
+                        progress=_progress,
+                        limit_chunks=int(limit_chunks),
+                        batch_size=int(batch_size),
+                        sleep_between=float(sleep_between),
+                    )
+                    status.update(label="Index built ✅", state="complete", expanded=False)
+
+                reset_retriever()
+                time.sleep(0.2)
                 st.success("Index rebuilt and retriever reloaded.")
             except Exception as e:
-                # Show a concise error (429s, etc.)
                 st.error(f"Indexing failed: {e}")
             finally:
                 st.session_state.is_indexing = False
 
-        st.divider()
-        st.subheader("🧪 Example questions")
-        examples = [
-            "Give me a 3-bullet summary of the main document.",
-            "What are the key steps mentioned for deployment?",
-            "List definitions and acronyms present in the docs.",
-            "Which file discusses limitations or caveats?",
-        ]
-        for ex in examples:
-            if st.button(ex, use_container_width=True):
-                st.session_state.q = ex
+    st.divider()
+    st.subheader("🧪 Example questions")
+    for ex in [
+        "Give me a 3-bullet summary of the main document.",
+        "What are the key steps mentioned for deployment?",
+        "List definitions and acronyms present in the docs.",
+        "Which file discusses limitations or caveats?",
+    ]:
+        if st.button(ex, use_container_width=True, key=f"ex_{ex[:12]}"):
+            st.session_state.q = ex
 
-        st.divider()
+    st.divider()
 
 # ---------- Main Layout ----------
 col_left, col_right = st.columns([7,5], gap="large")
