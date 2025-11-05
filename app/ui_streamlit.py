@@ -82,43 +82,43 @@ with st.sidebar:
         "Add PDF/Markdown/HTML/TXT", type=["pdf","md","html","txt"], accept_multiple_files=True
     )
     # in the sidebar, replace your current "Rebuild Index" handler with this:
-if st.button("Rebuild Index", type="primary", use_container_width=True, disabled=st.session_state.get("is_indexing", False)):
-    if st.session_state.get("is_indexing", False):
-        st.warning("Indexing is already running…")
-    else:
-        st.session_state.is_indexing = True
-        try:
-            doc_dir = Path(settings.DOC_DIR)
-            doc_dir.mkdir(parents=True, exist_ok=True)
-            if uploaded:
-                for f in uploaded:
-                    out = doc_dir / f.name
-                    with open(out, "wb") as w:
-                        w.write(f.getbuffer())
-            with st.spinner("Indexing… this may take a minute on hosted mode"):
-                ingest.build_index()     # your throttled ingest.py
-                reset_retriever()        # refresh retriever after new index
-                time.sleep(0.2)
-            st.success("Index rebuilt and retriever reloaded.")
-        except Exception as e:
-            # Show a concise error (429s, etc.)
-            st.error(f"Indexing failed: {e}")
-        finally:
-            st.session_state.is_indexing = False
+    if st.button("Rebuild Index", type="primary", use_container_width=True, disabled=st.session_state.get("is_indexing", False)):
+        if st.session_state.get("is_indexing", False):
+            st.warning("Indexing is already running…")
+        else:
+            st.session_state.is_indexing = True
+            try:
+                doc_dir = Path(settings.DOC_DIR)
+                doc_dir.mkdir(parents=True, exist_ok=True)
+                if uploaded:
+                    for f in uploaded:
+                        out = doc_dir / f.name
+                        with open(out, "wb") as w:
+                            w.write(f.getbuffer())
+                with st.spinner("Indexing… this may take a minute on hosted mode"):
+                    ingest.build_index()     # your throttled ingest.py
+                    reset_retriever()        # refresh retriever after new index
+                    time.sleep(0.2)
+                st.success("Index rebuilt and retriever reloaded.")
+            except Exception as e:
+                # Show a concise error (429s, etc.)
+                st.error(f"Indexing failed: {e}")
+            finally:
+                st.session_state.is_indexing = False
 
-    st.divider()
-    st.subheader("🧪 Example questions")
-    examples = [
-        "Give me a 3-bullet summary of the main document.",
-        "What are the key steps mentioned for deployment?",
-        "List definitions and acronyms present in the docs.",
-        "Which file discusses limitations or caveats?",
-    ]
-    for ex in examples:
-        if st.button(ex, use_container_width=True):
-            st.session_state.q = ex
+        st.divider()
+        st.subheader("🧪 Example questions")
+        examples = [
+            "Give me a 3-bullet summary of the main document.",
+            "What are the key steps mentioned for deployment?",
+            "List definitions and acronyms present in the docs.",
+            "Which file discusses limitations or caveats?",
+        ]
+        for ex in examples:
+            if st.button(ex, use_container_width=True):
+                st.session_state.q = ex
 
-    st.divider()
+        st.divider()
 
 # ---------- Main Layout ----------
 col_left, col_right = st.columns([7,5], gap="large")
