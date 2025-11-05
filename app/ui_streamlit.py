@@ -166,7 +166,6 @@ with col_left:
             "sources": [{"source": d.metadata.get("source",""), "text": d.page_content} for d in docs]
         })
         # Rerun to refresh the app and clear the input
-        st.session_state.q = ""
         st.rerun()
 
     # Chat history render
