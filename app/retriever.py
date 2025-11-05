@@ -9,7 +9,7 @@ def load_vector_store():
         from langchain_community.embeddings import OllamaEmbeddings as OE
         emb = OE(model=settings.OLLAMA_EMBED)
     elif settings.EMBEDDINGS_BACKEND == "hf":
-        from langchain_huggingface import HuggingFaceEmbeddings
+        from langchain_huggingface.embeddings import HuggingFaceEmbeddings
         emb = HuggingFaceEmbeddings(model_name=settings.HF_EMBED_MODEL)
     else:
         from langchain_openai import OpenAIEmbeddings
