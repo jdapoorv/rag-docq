@@ -7,7 +7,8 @@ if PROJECT_ROOT not in sys.path:
 # --- Streamlit Cloud: bridge secrets -> env vars ---
 try:
     import streamlit as st  # available on Cloud
-    for k in ("OPENAI_API_KEY", "MODE", "OPENAI_MODEL", "OPENAI_EMBED_MODEL"):
+    for k in ("OPENAI_API_KEY", "MODE", "OPENAI_MODEL", "OPENAI_EMBED_MODEL",
+              "EMBEDDINGS_BACKEND", "HF_EMBED_MODEL"):
         v = st.secrets.get(k) if hasattr(st, "secrets") else None
         if v and not os.getenv(k):
             os.environ[k] = str(st.secrets[k])
@@ -17,7 +18,6 @@ except Exception:
 
 import streamlit as st
 from typing import List, Dict
-from textwrap import shorten
 from app.rag_chain import answer, reset_retriever
 from app.config import settings
 from app import ingest
@@ -183,64 +183,101 @@ with st.sidebar:
 
     st.divider()
 
-# ---------- Main Layout ----------
-col_left, col_right = st.columns([7,5], gap="large")
+tabs = st.tabs(["💬 Ask", "📈 Evaluate"])
+with tabs[0]:
+    # (move your existing ask UI into this tab)
+    # ---------- Main Layout ----------
+    col_left, col_right = st.columns([7,5], gap="large")
 
-with col_left:
-    st.title("📄 RAG Document Query")
-    st.caption("Ask questions about your indexed documents. Answers include citations.")
+    with col_left:
+        st.title("📄 RAG Document Query")
+        st.caption("Ask questions about your indexed documents. Answers include citations.")
 
-    q = st.text_area("Your question", key="q", height=90, placeholder="e.g., What does the document talk about?")
-    go = st.button("Ask", type="primary")
+        q = st.text_area("Your question", key="q", height=90, placeholder="e.g., What does the document talk about?")
+        go = st.button("Ask", type="primary")
 
-    if go and q.strip():
-        with st.spinner("Thinking…"):
-            ans, docs = answer(q.strip())
-        st.session_state.history.insert(0, {
-            "q": q.strip(),
-            "a": ans,
-            "sources": [{"source": d.metadata.get("source",""), "text": d.page_content} for d in docs]
-        })
-        # Rerun to refresh the app and clear the input
-        st.rerun()
+        if go and q.strip():
+            with st.spinner("Thinking…"):
+                ans, docs = answer(q.strip())
+            st.session_state.history.insert(0, {
+                "q": q.strip(),
+                "a": ans,
+                "sources": [{"source": d.metadata.get("source",""), "text": d.page_content} for d in docs]
+            })
+            # Rerun to refresh the app and clear the input
+            st.rerun()
 
-    # Chat history render
-    for item in st.session_state.history:
-        st.markdown(f"#### ❓ {item['q']}")
-        st.markdown(f'<div class="answer">{item["a"]}</div>', unsafe_allow_html=True)
-        with st.expander("Show citations", expanded=False):
-            for i, s in enumerate(item["sources"], start=1):
-                src_name = s["source"] or "(unknown source)"
-                st.markdown(f"**[{i}] {src_name}**")
-                # Truncate text to approximately 8 lines of 120 characters each
-                text_clean = s["text"].replace('\r', ' ').replace('\n', ' ')
-                max_chars = 120 * 8  # Approximate 8 lines
-                if len(text_clean) > max_chars:
-                    text_clean = text_clean[:max_chars] + "…"
-                st.code(text_clean)
-        st.markdown("---")
+        # Chat history render
+        for item in st.session_state.history:
+            st.markdown(f"#### ❓ {item['q']}")
+            st.markdown(f'<div class="answer">{item["a"]}</div>', unsafe_allow_html=True)
+            with st.expander("Show citations", expanded=False):
+                for i, s in enumerate(item["sources"], start=1):
+                    src_name = s["source"] or "(unknown source)"
+                    st.markdown(f"**[{i}] {src_name}**")
+                    # Truncate text to approximately 8 lines of 120 characters each
+                    text_clean = s["text"].replace('\r', ' ').replace('\n', ' ')
+                    max_chars = 120 * 8  # Approximate 8 lines
+                    if len(text_clean) > max_chars:
+                        text_clean = text_clean[:max_chars] + "…"
+                    st.code(text_clean)
+            st.markdown("---")
 
-with col_right:
-    st.subheader("📚 Sources (latest answer)")
-    if st.session_state.history:
-        latest = st.session_state.history[0]
-        if latest["sources"]:
-            for i, s in enumerate(latest["sources"], start=1):
-                with st.container():
-                    st.markdown(f'<div class="source-card">', unsafe_allow_html=True)
-                    st.markdown(f'<div class="source-title">[{i}] {s["source"] or "(unknown)"} </div>', unsafe_allow_html=True)
-                    st.markdown(f'<div class="source-snippet">{s["text"][:800]}</div>', unsafe_allow_html=True)
-                    st.markdown("</div>", unsafe_allow_html=True)
-                    st.button(f"Copy [{i}] snippet", key=f"copy_{i}", on_click=st.session_state.setdefault, args=("copied", True))
+    with col_right:
+        st.subheader("📚 Sources (latest answer)")
+        if st.session_state.history:
+            latest = st.session_state.history[0]
+            if latest["sources"]:
+                for i, s in enumerate(latest["sources"], start=1):
+                    with st.container():
+                        st.markdown(f'<div class="source-card">', unsafe_allow_html=True)
+                        st.markdown(f'<div class="source-title">[{i}] {s["source"] or "(unknown)"} </div>', unsafe_allow_html=True)
+                        st.markdown(f'<div class="source-snippet">{s["text"][:800]}</div>', unsafe_allow_html=True)
+                        st.markdown("</div>", unsafe_allow_html=True)
+                        st.button(f"Copy [{i}] snippet", key=f"copy_{i}", on_click=st.session_state.setdefault, args=("copied", True))
+            else:
+                st.info("Run a query to see sources here.")
         else:
-            st.info("Run a query to see sources here.")
-    else:
-        st.info("No queries yet. Ask a question to populate sources.")
+            st.info("No queries yet. Ask a question to populate sources.")
 
-    st.divider()
-    st.subheader("📈 Session metrics")
-    # Simple counters; you can wire real latency/usage later
-    total_q = len(st.session_state.history)
-    st.metric("Questions asked", total_q)
-    unique_sources = len({s["source"] for item in st.session_state.history for s in item["sources"]})
-    st.metric("Unique sources cited", unique_sources)
+        st.divider()
+        st.subheader("📈 Session metrics")
+        # Simple counters; you can wire real latency/usage later
+        total_q = len(st.session_state.history)
+        st.metric("Questions asked", total_q)
+        unique_sources = len({s["source"] for item in st.session_state.history for s in item["sources"]})
+        st.metric("Unique sources cited", unique_sources)
+    
+with tabs[1]:
+    st.subheader("RAG Evaluation")
+    st.caption("Runs a small benchmark and reports retrieval + RAGAS metrics.")
+    eval_path = st.text_input("Eval file (JSONL)", "data/eval.jsonl")
+    if st.button("Run evaluation", type="secondary"):
+        with st.status("Evaluating…", expanded=True) as status:
+            from app.eval_ragas import load_eval_set, run_batch_eval, save_summary
+            items = load_eval_set(eval_path)
+            st.write(f"Loaded {len(items)} items")
+            rep = run_batch_eval(items)
+            save_summary(rep)
+            status.update(label="Evaluation complete ✅", state="complete", expanded=False)
+
+    # show latest summary if present
+    from pathlib import Path
+    summ = Path("data/eval/summary.json")
+    if summ.exists():
+        import json
+        st.markdown("### Latest results")
+        data = json.loads(summ.read_text())
+        cols = st.columns(4)
+        cols[0].metric("N (questions)", data.get("n", 0))
+        cols[1].metric("Recall@k", f'{(data.get("recall_at_k") or 0)*100:.1f}%')
+        cols[2].metric("Latency p50", f'{data.get("lat_p50",0):.2f}s')
+        cols[3].metric("Latency p95", f'{data.get("lat_p95",0):.2f}s')
+
+        st.markdown("#### RAGAS (higher is better)")
+        ragas_means = data.get("ragas_means", {})
+        for k, v in ragas_means.items():
+            st.write(f"- **{k}**: {v:.3f}")
+    else:
+        st.info("No evaluation summary found yet. Add `data/eval.jsonl` and run.")
+
