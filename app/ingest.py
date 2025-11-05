@@ -176,7 +176,7 @@ def build_index(progress=None, limit_chunks: int = 0, batch_size: int = 5, sleep
     pairs = list(zip(ok_texts, vecs))
 
     _emit(progress, "Building FAISS index…")
-    vs = FAISS.from_embeddings(pairs, metadatas=ok_metas)
+    vs = FAISS.from_embeddings(pairs, emb, metadatas=ok_metas)
 
     Path(settings.INDEX_DIR).mkdir(parents=True, exist_ok=True)
     vs.save_local(settings.INDEX_DIR)
