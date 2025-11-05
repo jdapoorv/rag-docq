@@ -59,6 +59,14 @@ code, pre code { font-size: 0.85rem !important; }
 """
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
+# ---------- Session State ----------
+if "history" not in st.session_state:
+    st.session_state.history: List[Dict] = []  # [{q, a, sources}]
+if "q" not in st.session_state:
+    st.session_state.q = ""
+if "is_indexing" not in st.session_state:
+    st.session_state.is_indexing = False
+
 # ---------- Sidebar ----------
 with st.sidebar:
     st.header("⚙️ Settings")
@@ -74,8 +82,8 @@ with st.sidebar:
         "Add PDF/Markdown/HTML/TXT", type=["pdf","md","html","txt"], accept_multiple_files=True
     )
     # in the sidebar, replace your current "Rebuild Index" handler with this:
-if st.button("Rebuild Index", type="primary", use_container_width=True, disabled=st.session_state.is_indexing):
-    if st.session_state.is_indexing:
+if st.button("Rebuild Index", type="primary", use_container_width=True, disabled=st.session_state.get("is_indexing", False)):
+    if st.session_state.get("is_indexing", False):
         st.warning("Indexing is already running…")
     else:
         st.session_state.is_indexing = True
@@ -111,14 +119,6 @@ if st.button("Rebuild Index", type="primary", use_container_width=True, disabled
             st.session_state.q = ex
 
     st.divider()
-
-# ---------- Session State ----------
-if "history" not in st.session_state:
-    st.session_state.history: List[Dict] = []  # [{q, a, sources}]
-if "q" not in st.session_state:
-    st.session_state.q = ""
-if "is_indexing" not in st.session_state:
-    st.session_state.is_indexing = False
 
 # ---------- Main Layout ----------
 col_left, col_right = st.columns([7,5], gap="large")
