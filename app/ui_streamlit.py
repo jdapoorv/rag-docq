@@ -4,13 +4,23 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
+# --- Streamlit Cloud: bridge secrets -> env vars ---
+try:
+    import streamlit as st  # available on Cloud
+    for k in ("OPENAI_API_KEY", "MODE", "OPENAI_MODEL", "OPENAI_EMBED_MODEL"):
+        v = st.secrets.get(k) if hasattr(st, "secrets") else None
+        if v and not os.getenv(k):
+            os.environ[k] = str(st.secrets[k])
+except Exception:
+    pass
+# ---------------------------------------------------
+
 import streamlit as st
 from typing import List, Dict
 from textwrap import shorten
 from app.rag_chain import answer, reset_retriever
 from app.config import settings
 from app import ingest
-import os
 from pathlib import Path
 import time
 
@@ -21,6 +31,10 @@ try:
 except Exception as e:
     # keep UI usable even if ingest fails (e.g., empty /data/raw on first boot)
     pass
+
+print("MODE:", os.getenv("MODE"))
+print("Has OPENAI_API_KEY:", bool(os.getenv("OPENAI_API_KEY")))
+print("OPENAI_EMBED_MODEL:", os.getenv("OPENAI_EMBED_MODEL"))
 
 # ---------- Page & Styles ----------
 st.set_page_config(page_title="RAG DocQ", page_icon="📄", layout="wide", initial_sidebar_state="expanded")
