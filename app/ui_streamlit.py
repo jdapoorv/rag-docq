@@ -1,3 +1,9 @@
+# --- path safety for Streamlit Cloud ---
+import sys, os
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
 import streamlit as st
 from typing import List, Dict
 from textwrap import shorten
